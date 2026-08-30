@@ -1,0 +1,18 @@
+[
+ {
+  "id": "leeds_bt_2026-08-30T13-59-15Z",
+  "label": "leeds_bt",
+  "timestamp": "2026-08-30T13:59:15.284226+00:00",
+  "isp": "BT Public Internet Service",
+  "city": "Leeds",
+  "country": "United Kingdom",
+  "medium": "wifi",
+  "download_mbps": 56.0,
+  "upload_mbps": 42.9,
+  "worst_loss_pct": 100.0,
+  "local_overhead_ms": 4.2,
+  "sao_paulo_p95_ms": 313.2,
+  "sao_paulo_route": "via USA: New York → Miami",
+  "page": "runs/leeds_bt_2026-08-30T13-59-15Z.html"
+ }
+]
