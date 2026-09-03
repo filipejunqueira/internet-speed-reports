@@ -22,13 +22,16 @@ h1{font-size:20px;margin:0 0 2px} h2{font-size:15px;margin:0 0 6px} h3{font-size
 details{margin:4px 0 0} summary{cursor:pointer;color:var(--muted);font-size:12px}
 table.stats{border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:12px;margin-top:6px;width:100%}
 table.stats th,table.stats td{text-align:right;padding:3px 8px;border-bottom:1px solid var(--grid)} table.stats th:first-child{text-align:left}
-.error{color:#d03b3b} .foot{color:var(--muted);font-size:12px;margin-top:20px}
+table.hops td:nth-child(2),table.hops td:nth-child(3),table.hops td:nth-child(4){text-align:left}
+table.hops tr.quiet td{text-align:left;color:var(--muted)} table.hops small{color:var(--muted)}
+.error{color:#d03b3b} .quiet{color:var(--muted)}
+.foot{color:var(--muted);font-size:12px;margin-top:20px}
 .plotly-graph-div{width:100%}
 
 .wrap{overflow-x:auto} table.stats td:first-child{text-align:left}
 a{color:#0b0b0b}</style></head><body><main>
-<h1>pingme — reports</h1><p class="meta">3 published runs, newest first</p>
+<h1>pingme — reports</h1><p class="meta">4 published runs, newest first</p>
 <section class="card"><div class="wrap"><table class="stats"><thead><tr>
-<th>label</th><th>date (UTC)</th><th>ISP</th><th>city</th><th>medium</th><th>down / up Mbit/s</th><th>worst loss %</th><th>São Paulo p95 ms</th><th>route verdict</th></tr></thead>
-<tbody><tr><td><a href="runs/leeds_bt_2026-08-30T15-32-20Z.html">leeds_bt</a></td><td>2026-08-30 15:32</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>44.3 / 63.4</td><td>100.0</td><td>345</td><td>via USA: New York → Miami</td></tr><tr><td><a href="runs/leeds_bt_2026-08-30T15-15-01Z.html">leeds_bt</a></td><td>2026-08-30 15:15</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>85.2 / 62.4</td><td>100.0</td><td>286</td><td>via USA: New York → Miami</td></tr><tr><td><a href="runs/leeds_bt_2026-08-30T13-59-15Z.html">leeds_bt</a></td><td>2026-08-30 13:59</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>56.0 / 42.9</td><td>100.0</td><td>313</td><td>via USA: New York → Miami</td></tr></tbody></table></div></section>
+<th>label</th><th>date (UTC)</th><th>ISP</th><th>city</th><th>medium</th><th>down / up Mbit/s</th><th>worst loss %</th><th>worst burst</th><th>São Paulo p95 ms</th><th>route verdict</th></tr></thead>
+<tbody><tr><td><a href="runs/2026-09-03T13-14-53Z.html">2026-09-03T13-14-53Z</a></td><td>2026-09-03 13:14</td><td>BT Public Internet Service</td><td>London</td><td>wifi</td><td>175.1 / 224.2</td><td>0.0</td><td>0</td><td>267</td><td>via USA: New York → Miami</td></tr><tr><td><a href="runs/leeds_bt_2026-08-30T15-32-20Z.html">leeds_bt</a></td><td>2026-08-30 15:32</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>44.3 / 63.4</td><td>100.0</td><td>—</td><td>345</td><td>via USA: New York → Miami</td></tr><tr><td><a href="runs/leeds_bt_2026-08-30T15-15-01Z.html">leeds_bt</a></td><td>2026-08-30 15:15</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>85.2 / 62.4</td><td>100.0</td><td>—</td><td>286</td><td>via USA: New York → Miami</td></tr><tr><td><a href="runs/leeds_bt_2026-08-30T13-59-15Z.html">leeds_bt</a></td><td>2026-08-30 13:59</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>56.0 / 42.9</td><td>100.0</td><td>—</td><td>313</td><td>via USA: New York → Miami</td></tr></tbody></table></div></section>
 </main></body></html>
