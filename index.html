@@ -1,9 +1,9 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>pingme — reports</title><style>
-:root{--surface:#fcfcfb;--page:#f9f9f7;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--border:rgba(11,11,11,0.10);color-scheme:light;}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--surface:#1a1a19;--page:#0d0d0d;--ink:#ffffff;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--border:rgba(255,255,255,0.10);color-scheme:dark;}}
-:root[data-theme="dark"]{--surface:#1a1a19;--page:#0d0d0d;--ink:#ffffff;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--border:rgba(255,255,255,0.10);color-scheme:dark;}
+:root{--surface:#fcfcfb;--page:#f9f9f7;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,0.10);color-scheme:light;}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--surface:#1a1a19;--page:#0d0d0d;--ink:#ffffff;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,0.10);color-scheme:dark;}}
+:root[data-theme="dark"]{--surface:#1a1a19;--page:#0d0d0d;--ink:#ffffff;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,0.10);color-scheme:dark;}
 body{margin:0;background:var(--page);color:var(--ink);font-family:system-ui, -apple-system, "Segoe UI", sans-serif;font-size:14px;line-height:1.45}
 main{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
 h1{font-size:20px;margin:0 0 2px} h2{font-size:15px;margin:0 0 6px} h3{font-size:13px;color:var(--ink2);margin:14px 0 6px;font-weight:600}
@@ -27,11 +27,60 @@ table.hops tr.quiet td{text-align:left;color:var(--muted)} table.hops small{colo
 .error{color:#d03b3b} .quiet{color:var(--muted)}
 .foot{color:var(--muted);font-size:12px;margin-top:20px}
 .plotly-graph-div{width:100%}
+.picker{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.picker th{font-weight:600;color:var(--ink2);text-align:left;padding:6px 8px;border-bottom:1px solid var(--axis);white-space:nowrap;cursor:pointer;user-select:none}
+.picker th.num{text-align:right}
+.picker td{padding:7px 8px;border-bottom:1px solid var(--grid);white-space:nowrap}
+.picker td.num{text-align:right}
+.picker tbody tr{cursor:pointer}
+.picker tbody tr:hover td{background:rgba(137,135,129,0.08)}
+.picker tbody tr.on:hover td{background:rgba(137,135,129,0.22)}
+/* a neutral tint: a selected row must not wear the colour that means "first run ticked" */
+.picker tr.on td{background:rgba(137,135,129,0.16)}
+.tick{display:inline-block;width:16px;height:16px;border:1.5px solid var(--ink2);border-radius:4px;vertical-align:middle;background:var(--surface)}
+.tick.on{border-color:var(--ink);background:var(--ink)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;vertical-align:middle}
+#pick{overflow-x:auto}
+.hint{color:var(--muted);font-size:12px;margin:8px 0 0}
+.runs{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:0 0 14px}
+/* the picker's name cell is a td.run as well, so the tile look stays inside the tile grid */
+.runs .run{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;border-top:3px solid var(--axis)}
+.runs .run .name{font-weight:600;font-size:14px}
+.runs .run .sub{color:var(--ink2);font-size:12px;margin:2px 0 8px}
+.runs .run .speed{font-size:22px;font-weight:600}
+.runs .run .speed small{font-size:12px;font-weight:400;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--axis);border-radius:8px;overflow:hidden;font-size:13px;vertical-align:middle}
+.seg span{padding:6px 12px;border-right:1px solid var(--grid);color:var(--ink2);cursor:pointer}
+.seg span:last-child{border-right:0}
+.seg span.on{background:var(--ink);color:var(--surface);font-weight:600}
+.filter{display:flex;align-items:center;gap:12px;margin:18px 0 12px;font-size:13px;color:var(--ink2);flex-wrap:wrap}
+.diff{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.diff th,.diff td{text-align:right;padding:5px 10px;border-bottom:1px solid var(--grid)}
+.diff th:first-child,.diff td:first-child{text-align:left;color:var(--ink2);font-weight:400}
+.diff thead th{color:var(--ink2);font-weight:600;border-bottom:1px solid var(--axis)}
+.diff td.best{font-weight:600;color:var(--ink)}
+.ctitle{font-size:13px;color:var(--ink2);margin:0 0 4px}
+.note{color:var(--muted);font-size:12px;margin:6px 0 0}
+.empty{padding:34px 16px;text-align:center;color:var(--ink2)}
+.empty b{display:block;font-size:16px;color:var(--ink);margin-bottom:4px}
+.frame{width:100%;border:0;display:block;min-height:600px}
+.refused{color:var(--ink2);font-size:13px;margin:8px 0 0}
+main.loading{opacity:0.55;transition:opacity 120ms}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:900px){.grid2{grid-template-columns:1fr}}
 
-.wrap{overflow-x:auto} table.stats td:first-child{text-align:left}
-a{color:#0b0b0b}</style></head><body><main>
-<h1>pingme — reports</h1><p class="meta">4 published runs, newest first</p>
-<section class="card"><div class="wrap"><table class="stats"><thead><tr>
-<th>label</th><th>date (UTC)</th><th>ISP</th><th>city</th><th>medium</th><th>down / up Mbit/s</th><th>worst loss %</th><th>worst burst</th><th>São Paulo p95 ms</th><th>route verdict</th></tr></thead>
-<tbody><tr><td><a href="runs/2026-09-03T13-14-53Z.html">2026-09-03T13-14-53Z</a></td><td>2026-09-03 13:14</td><td>BT Public Internet Service</td><td>London</td><td>wifi</td><td>175.1 / 224.2</td><td>0.0</td><td>0</td><td>267</td><td>via USA: New York → Miami</td></tr><tr><td><a href="runs/leeds_bt_2026-08-30T15-32-20Z.html">leeds_bt</a></td><td>2026-08-30 15:32</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>44.3 / 63.4</td><td>100.0</td><td>—</td><td>345</td><td>via USA: New York → Miami</td></tr><tr><td><a href="runs/leeds_bt_2026-08-30T15-15-01Z.html">leeds_bt</a></td><td>2026-08-30 15:15</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>85.2 / 62.4</td><td>100.0</td><td>—</td><td>286</td><td>via USA: New York → Miami</td></tr><tr><td><a href="runs/leeds_bt_2026-08-30T13-59-15Z.html">leeds_bt</a></td><td>2026-08-30 13:59</td><td>BT Public Internet Service</td><td>Leeds</td><td>wifi</td><td>56.0 / 42.9</td><td>100.0</td><td>—</td><td>313</td><td>via USA: New York → Miami</td></tr></tbody></table></div></section>
-</main></body></html>
+a{color:var(--ink)} header{max-width:1180px;margin:0 auto;padding:20px 16px 0}</style>
+<script id="pingme-tokens" type="application/json">{"runSlots": {"light": ["#2a78d6", "#eb6834", "#1baf7a"], "dark": ["#3987e5", "#d95926", "#199e70"]}, "chrome": {"light": {"surface": "#fcfcfb", "page": "#f9f9f7", "ink": "#0b0b0b", "ink2": "#52514e", "muted": "#898781", "grid": "#e1e0d9", "axis": "#c3c2b7", "border": "rgba(11,11,11,0.10)"}, "dark": {"surface": "#1a1a19", "page": "#0d0d0d", "ink": "#ffffff", "ink2": "#c3c2b7", "muted": "#898781", "grid": "#2c2c2a", "axis": "#383835", "border": "rgba(255,255,255,0.10)"}}, "status": {"good": "#0ca30c", "warning": "#fab219", "serious": "#ec835a", "critical": "#d03b3b"}, "targetOrder": ["router", "isp-hop", "london", "madrid", "us-east", "sao-paulo"], "thresholds": {"lossWarn": 1.0, "lossCrit": 5.0, "penaltyWarn": 50.0, "penaltyCrit": 200.0, "burstWarn": 2, "burstCrit": 5}, "intervalS": 0.2, "maxRuns": 3, "font": "system-ui, -apple-system, \"Segoe UI\", sans-serif"}</script></head><body>
+<header>
+<h1>pingme — reports</h1>
+<p class="meta">4 published runs. Every run measures ping, jitter, packet loss,
+download and upload, and the extra delay while the line is busy, against the router and
+Valve's Dota relays in London, Madrid, US-East and São Paulo.</p>
+</header>
+<main></main>
+<noscript><p>This page builds itself with JavaScript, which is switched off here. The list
+of runs is readable as it stands at <a href="runs/index.json">runs/index.json</a>, and each
+run has its own page under <code>runs/</code>.</p></noscript>
+<script src="assets/plotly-7.0.0.min.js"></script>
+<script type="module" src="assets/app.js"></script>
+</body></html>
