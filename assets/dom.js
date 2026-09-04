@@ -276,8 +276,17 @@ export function detailFrame(id) {
     'Open this report on its own</a></p></section>'
 }
 
-export function chartCard(title, inner) {
-  return `<section class="card"><h2>${esc(title)}</h2>${inner}</section>`
+/**
+ * One card with a heading over it.
+ *
+ * `headingId` is optional and lands on the heading itself. A card whose title names the
+ * chosen target has to have that word rewritten when the reader picks a different one, and
+ * an id is how app.js finds the heading without rebuilding the card around it — rebuilding
+ * would throw away the plotly figure inside, which is the whole cost this avoids.
+ */
+export function chartCard(title, inner, headingId) {
+  const id = headingId ? ` id="${esc(headingId)}"` : ''
+  return `<section class="card"><h2${id}>${esc(title)}</h2>${inner}</section>`
 }
 
 export function prettyTarget(name) {

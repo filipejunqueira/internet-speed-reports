@@ -119,7 +119,10 @@ function hoverFor(point, name) {
   return `${where}${address}<br>${name}`
 }
 
-/** The plotly map: one line per ticked run that has a trace to this target.
+/** The plotly map: the route of each ticked run that has a trace to this target.
+ *
+ * Each run costs at most two line traces — one holding its solid legs, one its dashed —
+ * plus the trace that draws its points.
  *
  * `runs` come in slot order and carry their slot when the page attaches one, so a run
  * keeps its colour when another run above it is unticked.
@@ -149,19 +152,42 @@ export function mapFigure(runs, target, tokens) {
           ip: relay.ip, ms: null, hiddenBefore: walked.hiddenAfter })
       }
     }
+    // Plotly dashes a whole line or none of it, and only the legs that jump over hops we
+    // could not place should read as a guess. That used to mean one scattergeo trace per
+    // leg, which is the most expensive trace type plotly has and is rebuilt on every
+    // target change; instead each run gets at most two, because a null in the coordinate
+    // arrays lifts the pen and lets one trace hold legs that do not join up. Drawn against Sao
+    // Paulo, that takes the three traced runs in the log from 24 traces to 11, and the two
+    // labelled leeds_bt from 15 to 8.
+    const solid = { lat: [], lon: [], hovertext: [] }
+    const dashed = { lat: [], lon: [], hovertext: [] }
     for (let j = 1; j < points.length; j++) {
       const a = points[j - 1], b = points[j]
-      // One trace per leg: plotly dashes a whole line or none of it, and only the legs
-      // that jump over hops we could not place should read as a guess.
+      const into = b.hiddenBefore ? dashed : solid
+      const say = b.hiddenBefore ? `${name}: ${b.hiddenBefore} hidden hop(s)` : name
+      // Two endpoints then a null, and the hover text indexed against them point by point,
+      // so each leg keeps its own sentence instead of the whole trace sharing one. The
+      // null needs an entry too or every leg after the first would show the one before it.
+      into.lat.push(a.lat, b.lat, null)
+      into.lon.push(a.lon, b.lon, null)
+      into.hovertext.push(say, say, '')
+    }
+    // Whichever trace holds the first leg carries the legend, so the swatch is dashed or
+    // solid exactly as it was when the first leg had a trace to itself.
+    const legendStyle = points.length > 1 && points[1].hiddenBefore ? 'dash' : 'solid'
+    for (const [style, legs] of [['solid', solid], ['dash', dashed]]) {
+      if (!legs.lat.length) continue // no legs of this kind: no empty trace for plotly to project
       data.push({
-        type: 'scattergeo', lat: [a.lat, b.lat], lon: [a.lon, b.lon], mode: 'lines',
-        line: { width: 2, color: colour, dash: b.hiddenBefore ? 'dash' : 'solid' },
+        type: 'scattergeo', lat: legs.lat, lon: legs.lon, mode: 'lines',
+        line: { width: 2, color: colour, dash: style },
+        // What makes the null a lifted pen rather than a straight line across the gap. It
+        // is plotly's default, and it is spelled out because the geometry depends on it.
+        connectgaps: false,
         // Grouped by the slot, not by the name, exactly as figures.js does: the log already
         // holds two runs both labelled "leeds_bt", and grouping those by name would collapse
         // them into one legend entry, so clicking either would hide both routes.
-        name, legendgroup: role, showlegend: j === 1 && drawn.length > 1,
-        hovertext: b.hiddenBefore ? `${name}: ${b.hiddenBefore} hidden hop(s)` : name,
-        hoverinfo: 'text', meta: { role }
+        name, legendgroup: role, showlegend: drawn.length > 1 && style === legendStyle,
+        hovertext: legs.hovertext, hoverinfo: 'text', meta: { role }
       })
     }
     data.push({

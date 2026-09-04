@@ -14,11 +14,18 @@
  * immediate and the charts already on screen stay put, dimmed, while the fetch is in
  * flight. A blank page tells the reader nothing, so nothing here is ever allowed to
  * produce one.
+ *
+ * What a click costs is decided in one place: state.whatChanged() says whether the ticked
+ * runs moved, only the target moved, or nothing that shows moved at all. A target change
+ * edits the comparison where it stands — a few headings, two tables, and the three figures
+ * that follow the target handed to Plotly.react — because rebuilding the container would
+ * throw seven live figures away and build seven more, which is what used to freeze the
+ * page after a handful of clicks.
  */
 
 import * as dom from './dom.js'
 import {
-  DEFAULT_TARGET, readState, selectedIds, slotOf, sortRows, toggleRun, writeState
+  DEFAULT_TARGET, readState, selectedIds, slotOf, sortRows, toggleRun, whatChanged, writeState
 } from './state.js'
 import {diffRows, liveTargets, sharedYRange} from './stats.js'
 import {
@@ -40,6 +47,17 @@ const PLOTLY_CONFIG = {
 // figure with no height of its own to its container.
 const MAP_HEIGHT_PX = 500
 
+// The parts of the comparison that name or list the chosen target, each with an id of its
+// own so that picking another target can rewrite exactly those and leave every figure div
+// where it is. Nothing else in the comparison is written from the target.
+const HEAD_DIFF = 'head-diff'
+const HEAD_HISTOGRAM = 'head-histogram'
+const HEAD_TIMELINE = 'head-timeline'
+const HEAD_MAP = 'head-map'
+const BOX_DIFF = 'box-diff'
+const BOX_HOPS = 'box-hops'
+const MAP_NOTE = 'map-note'
+
 // Everything the page knows, kept in module variables because there is exactly one page.
 let tokens = null
 let indexRows = []
@@ -47,6 +65,18 @@ let state = null
 // Every render takes a number. A fetch that finishes after a later tick has already
 // started rendering must not overwrite it, so it checks its number before writing.
 let renderSeq = 0
+// The state the page below the picker was actually drawn from, so the next click can be
+// told what changed. Written only by a render that reached the end without being
+// overtaken, because it has to describe what is on screen rather than what was asked for.
+let rendered = null
+// The comparison currently on screen: the ticked runs with their slots attached, the
+// targets they have between them, and the one target the drill-down is showing. Null
+// whenever the body holds anything else — nothing ticked, one run, or the failure
+// sentence — because those three views never name a target.
+let drawn = null
+// The plotly config every figure is drawn with, built in boot() once the tokens block is
+// in hand. Until then it is the constant above.
+let plotlyConfig = PLOTLY_CONFIG
 // Fetched run records, so re-ticking a run, or switching target, costs nothing.
 const cache = new Map()
 
@@ -54,6 +84,39 @@ const cache = new Map()
 
 function mainEl() {
   return document.querySelector('main')
+}
+
+/**
+ * Put new HTML into a container, taking any live figures inside it apart first.
+ *
+ * Plotly keeps its own state for every div it has drawn into and hangs a window resize
+ * listener off it, and none of that goes away when the element is dropped: overwriting the
+ * innerHTML of a container that holds figures leaks all of it, and the leak is per figure
+ * per click. That is why the page used to degrade into a freeze rather than merely being
+ * slow — the first click was survivable, the sixth was not. Every place on this page that
+ * replaces the contents of a container goes through here, including the ones that put the
+ * empty card, the single-run frame or a failure sentence on screen, because each of those
+ * may be replacing a comparison with seven figures in it.
+ */
+function replaceHtml(container, html) {
+  if (!container) return
+  purgeFigures(container)
+  container.innerHTML = html
+}
+
+/**
+ * Hand every plotly figure inside this element back to plotly.
+ *
+ * A div plotly has drawn into carries the class js-plotly-plot; the _fullLayout check is
+ * the second half of the same question, because that property is what plotly puts on a div
+ * it is actually holding state for. Purging a div that was never drawn into does nothing,
+ * so the check only saves the call, but it also keeps this honest about what it is asking.
+ */
+function purgeFigures(container) {
+  if (!container || typeof Plotly === 'undefined' || !Plotly.purge) return
+  container.querySelectorAll('.js-plotly-plot').forEach((div) => {
+    if (div._fullLayout) Plotly.purge(div)
+  })
 }
 
 /** The colours, target order and thresholds Python wrote into the page as a JSON block. */
@@ -91,7 +154,7 @@ async function fetchRun(id) {
 function renderPicker(refused) {
   const rows = sortRows(indexRows, state.sort.key, state.sort.dir)
   const note = refused ? dom.refusedNote(tokens.maxRuns) : ''
-  document.getElementById('pick').innerHTML = dom.pickerTable(rows, state, tokens) + note
+  replaceHtml(document.getElementById('pick'), dom.pickerTable(rows, state, tokens) + note)
   paintSwatches()
 }
 
@@ -138,24 +201,56 @@ function pushUrl() {
 // ---- what sits under the picker -----------------------------------------------------------
 
 /**
+ * Draw whatever the last click actually changed, and nothing else.
+ *
+ * Three answers, from state.whatChanged(): the ticked runs moved and the page below the
+ * picker is built again; only the target moved and the comparison already on screen is
+ * edited in place, which is the difference between a click that costs a few milliseconds
+ * and one that tears down seven figures and builds them again; or nothing that shows
+ * changed at all, and nothing is drawn.
+ */
+async function renderBody() {
+  const change = whatChanged(rendered, state)
+  if (change === 'none') return
+  if (change === 'target') {
+    // A target only shows in the comparison. With nothing ticked, or one run ticked, the
+    // card and the frame below say nothing about it, so there is nothing to redraw.
+    if (drawn) return retarget()
+    rendered = state
+    return
+  }
+  return rebuildBody()
+}
+
+/**
  * Nothing ticked, one ticked or several: the three views, and the fetch in between.
  *
  * The previous view stays on screen, dimmed by the `loading` class, until the numbers for
  * the newly ticked run have arrived. Nothing here ever empties the page first.
  */
-async function renderBody() {
+async function rebuildBody() {
   const seq = ++renderSeq
+  // Claimed before the first await, not after the last one. These two lines describe what
+  // the newest render is drawing, not what finished drawing: with them at the end, a click
+  // back to the previous target while a redraw was in flight read as "nothing changed" and
+  // was dropped, and the render already running then committed over it. The page ended up
+  // showing one target while the address bar named another, and the next click did nothing.
+  rendered = state
   const ids = selectedIds(state)
   const body = document.getElementById('body')
 
   if (ids.length === 0) {
     setLoading(false)
-    body.innerHTML = dom.emptyCard()
+    replaceHtml(body, dom.emptyCard())
+    drawn = null
+    rendered = state
     return
   }
   if (ids.length === 1) {
     setLoading(false)
     renderDetail(body, ids[0])
+    drawn = null
+    rendered = state
     return
   }
 
@@ -173,7 +268,12 @@ async function renderBody() {
   const failed = fetched.filter((item) => item.error).map((item) => item.id)
   const runs = fetched.filter((item) => item.record)
     .map((item) => ({...item.record, slot: slotOf(state, item.id)}))
-  await renderComparison(body, runs, failed)
+  const context = await renderComparison(body, runs, failed)
+  // Drawing the figures is another wait, so the check is worth repeating: only a render
+  // that got this far without being overtaken may say what is on screen.
+  if (seq !== renderSeq) return
+  drawn = context
+  rendered = state
 }
 
 /** Dim the page while the numbers for a newly ticked run are on their way, or stop. */
@@ -188,7 +288,7 @@ function setLoading(on) {
  * content so the reader never meets a scrollbar inside a scrollbar.
  */
 function renderDetail(body, id) {
-  body.innerHTML = dom.detailFrame(id)
+  replaceHtml(body, dom.detailFrame(id))
   const frame = body.querySelector('iframe.frame')
   if (frame) frame.addEventListener('load', () => sizeFrame(frame))
 }
@@ -221,18 +321,22 @@ function onResize() {
 /**
  * Two or three runs, top to bottom: what they were, the two overview charts, then one
  * target's figures in a table, a histogram, a timeline panel per run and the route map.
+ *
+ * Returns what it drew — the runs with their slots, the targets they have between them and
+ * the target the drill-down landed on — so that picking another target can work from it
+ * without fetching or rebuilding anything. Nothing to draw returns null.
  */
 async function renderComparison(body, runs, failed) {
   if (runs.length === 0) {
-    body.innerHTML = failedNote(failed)
-    return
+    replaceHtml(body, failedNote(failed))
+    return null
   }
   const live = liveTargets(runs, tokens.targetOrder)
   const target = resolveTarget(live)
   const yRange = sharedYRange(runs, target)
   const named = dom.prettyTarget(target)
 
-  body.innerHTML = failedNote(failed) +
+  replaceHtml(body, failedNote(failed) +
     dom.runTiles(runs, state, tokens) +
     '<div class="grid2">' +
     dom.chartCard('Typical round trip, every target',
@@ -246,32 +350,119 @@ async function renderComparison(body, runs, failed) {
     '</div>' +
     dom.targetSelector(live, target) +
     dom.chartCard(`Every figure for ${named}`,
-      dom.diffTable(diffRows(runs, target), runs, target, tokens)) +
+      // The table sits in a box of its own because a target change replaces the table
+      // itself, so the id it is found by has to be on something that outlives it.
+      `<div id="${BOX_DIFF}">` +
+      dom.diffTable(diffRows(runs, target), runs, target, tokens) + '</div>', HEAD_DIFF) +
     dom.chartCard(`Where the round trips to ${named} fell`,
       figureDiv('fig-histogram') +
       '<p class="note">Counts of probes, so a longer run draws a taller outline. Compare ' +
-      'the shapes and where they sit, not their heights.</p>') +
+      'the shapes and where they sit, not their heights.</p>', HEAD_HISTOGRAM) +
     dom.chartCard(`Round trip to ${named} through each run`,
       timelinePanels(runs) +
       '<p class="note">Side by side rather than one on top of the other: the runs are ' +
       'different lengths and their speed tests start at different seconds. The shaded bands ' +
       'are the download and the upload; the crosses along the floor are probes that never ' +
-      'came back.</p>') +
+      'came back.</p>', HEAD_TIMELINE) +
     dom.chartCard(`The route to ${named}`,
-      figureDiv('fig-map', MAP_HEIGHT_PX) + mapNote(runs, target) +
-      dom.hopTable(hopRows(runs, target), tokens))
+      figureDiv('fig-map', MAP_HEIGHT_PX) +
+      `<p class="note" id="${MAP_NOTE}">${mapNoteText(runs, target)}</p>` +
+      // Empty when no ticked run has a route to this target, so the box has to be here
+      // whether there is a table in it or not: a target change may put one back.
+      `<div id="${BOX_HOPS}">${dom.hopTable(hopRows(runs, target), tokens)}</div>`, HEAD_MAP))
 
-  const drawn = [
+  const figures = [
     plot('fig-overview', overviewFigure(runs, tokens)),
     plot('fig-penalty', penaltyFigure(runs, tokens)),
     plot('fig-histogram', histogramFigure(runs, target, tokens)),
     plot('fig-map', mapFigure(runs, target, tokens))
   ]
   runs.forEach((run, i) => {
-    drawn.push(plot(timelineId(i), timelineFigure(run, run.slot, target, yRange, tokens)))
+    figures.push(plot(timelineId(i), timelineFigure(run, run.slot, target, yRange, tokens)))
   })
-  await Promise.all(drawn)
+  await Promise.all(figures)
   applyTheme() // the figures were built from the light tokens, so this is where dark lands
+  return {runs, live, target}
+}
+
+/**
+ * The reader picked a different target while a comparison is already on screen.
+ *
+ * Nothing about the runs has changed — state.whatChanged() only says "target" when the
+ * ticked ids and their colour slots are identical — so the container is left exactly where
+ * it is and only the parts that name or draw the target are touched: the four headings
+ * that carry its name, the difference table, the map note, the hop tables and the pressed
+ * segment of the selector, and then plotly is handed the new numbers for the histogram,
+ * the map and each timeline panel. Because those figure divs are never discarded,
+ * Plotly.react can diff against what is already drawn instead of building it again.
+ *
+ * The two overview charts are not touched at all. overviewFigure(runs, tokens) and
+ * penaltyFigure(runs, tokens) take no target: they draw every target at once, from the
+ * runs and the token order alone, so nothing in them can have changed.
+ */
+async function retarget() {
+  const {runs, live} = drawn
+  const target = resolveTarget(live)
+  // Two states can ask for the same drawn target: a link naming São Paulo, opened against
+  // runs that only reached the router, resolves back to the router either way.
+  if (target === drawn.target) {
+    rendered = state
+    return
+  }
+  const seq = ++renderSeq
+  rendered = state // claimed before the awaits, for the reason given in rebuildBody
+  const named = dom.prettyTarget(target)
+  setHeading(HEAD_DIFF, `Every figure for ${named}`)
+  setHeading(HEAD_HISTOGRAM, `Where the round trips to ${named} fell`)
+  setHeading(HEAD_TIMELINE, `Round trip to ${named} through each run`)
+  setHeading(HEAD_MAP, `The route to ${named}`)
+  setBox(BOX_DIFF, dom.diffTable(diffRows(runs, target), runs, target, tokens))
+  setBox(MAP_NOTE, mapNoteText(runs, target))
+  setBox(BOX_HOPS, dom.hopTable(hopRows(runs, target), tokens))
+  pressSegment(target)
+
+  const yRange = sharedYRange(runs, target)
+  const figures = [
+    plot('fig-histogram', histogramFigure(runs, target, tokens)),
+    plot('fig-map', mapFigure(runs, target, tokens))
+  ]
+  runs.forEach((run, i) => {
+    figures.push(plot(timelineId(i), timelineFigure(run, run.slot, target, yRange, tokens)))
+  })
+  await Promise.all(figures)
+  // A second target click while these were drawing owns the page now.
+  if (seq !== renderSeq) return
+  drawn = {...drawn, target}
+  // The redrawn figures come back in their light colours and the table and hop tables
+  // carry fresh swatches, both of which this puts right in dark mode. Only the figures this
+  // function redrew are named: the overview and the penalty were never touched and still
+  // wear the colours the last full render gave them.
+  applyTheme(['fig-histogram', 'fig-map', ...runs.map((_, i) => timelineId(i))])
+}
+
+/** The text of one card heading. Assigning textContent escapes the target name for us. */
+function setHeading(id, text) {
+  const el = document.getElementById(id)
+  if (el) el.textContent = text
+}
+
+/** Refill one box that holds no figures. Everything in `html` has already been escaped. */
+function setBox(id, html) {
+  const el = document.getElementById(id)
+  if (el) el.innerHTML = html
+}
+
+/**
+ * Move the pressed segment of the target selector.
+ *
+ * The segments themselves cannot change here — which targets are offered depends on the
+ * runs, not on the one chosen — so this moves the "on" class rather than rewriting the
+ * control, which keeps the markup identical to what dom.targetSelector() writes.
+ */
+function pressSegment(target) {
+  document.querySelectorAll('.seg [data-target]').forEach((segment) => {
+    segment.classList.toggle('on', segment.dataset.target === target)
+  })
 }
 
 /**
@@ -306,8 +497,13 @@ function timelinePanels(runs) {
   return `<div class="grid2">${panels}</div>`
 }
 
-/** What the map leaves out: a run measured without `--web` or `--publish` has no route. */
-function mapNote(runs, target) {
+/**
+ * What the map leaves out: a run measured without `--web` or `--publish` has no route.
+ *
+ * The sentence only, without the paragraph around it: the paragraph stays on the page
+ * across a target change and has its contents replaced with this.
+ */
+function mapNoteText(runs, target) {
   const missing = untracedRuns(runs, target).map((run) => dom.esc(dom.runName(run)))
   // A run measured without --web or --publish carries no route in its saved record, even
   // when it was published later and its own page shows one: publishing traced the route
@@ -318,8 +514,8 @@ function mapNote(runs, target) {
       `${missing.length > 1 ? 'those runs are' : 'that run is'} not drawn here. ` +
       'Its own report page may still show one, traced when it was published.'
     : ''
-  return '<p class="note">Each point is where a hop answered from, which is not the same as ' +
-    'where the cable goes. A dashed leg jumps over hops that did not answer.' + omitted + '</p>'
+  return 'Each point is where a hop answered from, which is not the same as ' +
+    'where the cable goes. A dashed leg jumps over hops that did not answer.' + omitted
 }
 
 function failedNote(failed) {
@@ -338,11 +534,32 @@ function nameOf(id) {
   return row ? dom.runName(row) : id
 }
 
-/** Draw one figure. Returns the promise so the caller can wait before restyling for dark. */
+/**
+ * Draw one figure. Returns the promise so the caller can wait before restyling for dark.
+ *
+ * Plotly.react rather than Plotly.newPlot: same arguments, but it works out the difference
+ * between what it is given and what is already in the div instead of taking the figure
+ * apart and building it again. On a div that has never been drawn into there is no
+ * difference between the two, so this is safe as the only call the page makes.
+ */
 function plot(id, figure) {
   const div = document.getElementById(id)
   if (!div || !figure) return Promise.resolve()
-  return Plotly.newPlot(div, figure.data, figure.layout, PLOTLY_CONFIG)
+  return Plotly.react(div, figure.data, figure.layout, plotlyConfig)
+}
+
+/**
+ * The plotly config, with the map's topology file added when the site carries its own.
+ *
+ * publish() vendors plotly's world map into the site's assets and writes the folder into
+ * the tokens block as topojsonUrl; plotly joins that straight onto the file name, so the
+ * string is passed exactly as Python wrote it, trailing slash and all. When the key is
+ * absent or null the option is left out altogether and plotly fetches the map from its own
+ * CDN, which is what the page did before the file was vendored.
+ */
+function configFor(loaded) {
+  const url = loaded && typeof loaded.topojsonUrl === 'string' ? loaded.topojsonUrl : ''
+  return url ? {...PLOTLY_CONFIG, topojsonURL: url} : PLOTLY_CONFIG
 }
 
 // ---- light and dark -----------------------------------------------------------------------
@@ -363,12 +580,18 @@ function isDark() {
  * render_web._theme_js() appends to them; the explorer shell has no such script, so this
  * is the only place it happens here.
  */
-function applyTheme() {
+function applyTheme(ids) {
   const dark = isDark()
   const roles = themeRoles(tokens, dark)
   const chrome = tokens.chrome[dark ? 'dark' : 'light']
-  document.querySelectorAll('.plotly-graph-div').forEach((div) =>
-    restyleFigure(div, roles, chrome, dark))
+  // js-plotly-plot is the class plotly.js sets on a div it has drawn into. The report pages
+  // carry plotly-graph-div as well, but that one is written by plotly's Python HTML writer,
+  // not by the library, so looking for it here found nothing at all and every figure on this
+  // page kept its light colours on a dark screen.
+  const figures = ids
+    ? ids.map((id) => document.getElementById(id)).filter(Boolean)
+    : Array.from(document.querySelectorAll('.js-plotly-plot'))
+  figures.forEach((div) => restyleFigure(div, roles, chrome, dark))
   paintSwatches()
 }
 
@@ -426,11 +649,15 @@ function reportFailure(error) {
   const el = mainEl()
   if (!el) return
   el.classList.remove('loading')
-  el.innerHTML = '<section class="card empty"><b>This page could not build itself</b>' +
+  // Through replaceHtml like everything else: this may be replacing a whole comparison,
+  // and a page that has just failed is the last place to leak seven figures.
+  replaceHtml(el, '<section class="card empty"><b>This page could not build itself</b>' +
     `<p>${dom.esc(error && error.message ? error.message : String(error))}</p>` +
     '<p>The runs themselves are fine: the list of them is at ' +
     '<a href="runs/index.json">runs/index.json</a>, and every run has its own page under ' +
-    '<code>runs/</code>.</p></section>'
+    '<code>runs/</code>.</p></section>')
+  drawn = null
+  rendered = null
 }
 
 /** Keep at most one ticked run per colour the page was given, lowest slots first. */
@@ -456,6 +683,7 @@ function pruneMissing() {
 
 async function boot() {
   tokens = readTokens()
+  plotlyConfig = configFor(tokens)
   // readState caps a shared link at its own fallback, which it has to have because it is
   // read before this page has its tokens in hand. The number that actually matters is
   // tokens.maxRuns, one per colour Python published, so the link is cut back to that here.
@@ -470,11 +698,13 @@ async function boot() {
   pruneMissing()
 
   const el = mainEl()
-  el.innerHTML = '<section class="card" id="pick"></section><div id="body"></div>'
+  replaceHtml(el, '<section class="card" id="pick"></section><div id="body"></div>')
   el.addEventListener('click', onClick)
   window.addEventListener('resize', onResize)
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme)
-  new MutationObserver(applyTheme).observe(document.documentElement,
+  // Wrapped, both of them: each would otherwise hand its own argument (an Event, a list of
+  // mutations) to applyTheme, which reads its first argument as a list of figure ids.
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme())
+  new MutationObserver(() => applyTheme()).observe(document.documentElement,
     {attributes: true, attributeFilter: ['data-theme']})
 
   renderPicker(false)

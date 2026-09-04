@@ -85,6 +85,46 @@ export function selectedIds(state) {
 }
 
 /**
+ * What is different between two states, and so how much of the page has to be redrawn:
+ * "structure", "target" or "none".
+ *
+ * "structure" means the whole thing below the picker has to be built again: the view kind
+ * changed (nothing ticked, one ticked, several), or the ticked runs changed, or one of
+ * them changed colour. "target" means only the chosen target moved, so the same runs are
+ * still on screen wearing the same colours and only the headings, tables and figures that
+ * follow the target have to be redone. That is the load-bearing reason the target path may
+ * reuse the run records already fetched and leave every chart div where it is: "target"
+ * guarantees the ids and the slots are untouched.
+ *
+ * Sorting the picker is neither. The picker redraws itself the moment a header is clicked
+ * and nothing below it reads the order.
+ *
+ * A missing state counts as "structure": the first render has nothing on screen to keep.
+ */
+export function whatChanged(previous, next) {
+  if (!previous || !next) return 'structure'
+  const before = selectedKeys(previous)
+  const after = selectedKeys(next)
+  if (before.length !== after.length) return 'structure'
+  if (before.some((key, i) => key !== after[i])) return 'structure'
+  if ((previous.target || DEFAULT_TARGET) !== (next.target || DEFAULT_TARGET)) return 'target'
+  return 'none'
+}
+
+/**
+ * Each ticked run as "id:slot", in slot order.
+ *
+ * The slot is in the key as well as the id because it is the run's colour: two states that
+ * tick the same runs in the same order but hand them different colours are as different to
+ * the charts as a tick would be.
+ */
+function selectedKeys(state) {
+  return [...(state.selected || [])]
+    .sort((a, b) => a.slot - b.slot)
+    .map(entry => `${entry.id}:${entry.slot}`)
+}
+
+/**
  * Read the state back out of a query string such as "?runs=a,b&target=london&sort=p95:asc".
  * Anything unknown or malformed falls back to the default rather than throwing, because
  * this string is whatever somebody happened to paste into the address bar.
