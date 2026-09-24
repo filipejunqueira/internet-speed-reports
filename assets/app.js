@@ -29,7 +29,7 @@ import {
 } from './state.js'
 import {diffRows, liveTargets, sharedYRange} from './stats.js'
 import {
-  histogramFigure, overviewFigure, penaltyFigure, themeRoles, timelineFigure
+  histogramFigure, overviewFigure, penaltyFigure, themeRoles, themeTextUpdate, timelineFigure
 } from './figures.js'
 import {datedRoutes, hopRows, mapFigure, untracedRuns} from './map.js'
 
@@ -630,7 +630,8 @@ function restyleFigure(div, roles, chrome, dark) {
     'geo.landcolor': dark ? '#2a2a28' : '#f2efe9',
     'geo.oceancolor': dark ? '#151a20' : '#dbe9f6',
     'geo.countrycolor': dark ? '#444' : '#bbb',
-    'geo.coastlinecolor': dark ? '#555' : '#999'
+    'geo.coastlinecolor': dark ? '#555' : '#999',
+    ...themeTextUpdate(div.layout, tokens, dark)
   })
 }
 

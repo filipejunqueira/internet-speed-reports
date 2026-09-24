@@ -56,6 +56,37 @@ export function themeRoles(tokens, dark) {
 }
 
 /**
+ * The layout update that repaints a figure's chrome text for the theme in force.
+ *
+ * Every figure here is built in light chrome, and text given a colour of its own does not
+ * follow `font.color`: the legend, the axis titles, the tick labels and each annotation keep
+ * whatever they were built with. On a dark page that left them at #52514e on #1a1a19, 2.2:1.
+ * An annotation is recognised by its colour, either theme's secondary or muted ink, so one
+ * written in a run's colour is left alone and a page switched back finds its way home.
+ */
+export function themeTextUpdate(layout, tokens, dark) {
+  const to = dark ? tokens.chrome.dark : tokens.chrome.light
+  const swap = new Map()
+  for (const from of [tokens.chrome.light, tokens.chrome.dark]) {
+    swap.set(from.ink2, to.ink2)
+    swap.set(from.muted, to.muted)
+  }
+  const update = {
+    'legend.font.color': to.ink2,
+    'xaxis.title.font.color': to.ink2, 'yaxis.title.font.color': to.ink2,
+    'xaxis.tickfont.color': to.muted, 'yaxis.tickfont.color': to.muted
+  }
+  const notes = (layout && layout.annotations) || []
+  if (notes.length) {
+    update.annotations = notes.map((note) => {
+      const colour = note.font && swap.get(note.font.color)
+      return colour ? { ...note, font: { ...note.font, color: colour } } : note
+    })
+  }
+  return update
+}
+
+/**
  * Median round trip per target, one bar per ticked run, with each run's p95 as a tick.
  *
  * Targets run down the y axis in the order the tokens block gives, first at the top, and a
