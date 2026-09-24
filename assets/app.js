@@ -31,7 +31,7 @@ import {diffRows, liveTargets, sharedYRange} from './stats.js'
 import {
   histogramFigure, overviewFigure, penaltyFigure, themeRoles, timelineFigure
 } from './figures.js'
-import {hopRows, mapFigure, untracedRuns} from './map.js'
+import {datedRoutes, hopRows, mapFigure, untracedRuns} from './map.js'
 
 // The mode bar keeps zoom and pan, which are worth having on a route map and on a long
 // timeline, and loses the two selection tools, which do nothing on any chart here.
@@ -514,8 +514,15 @@ function mapNoteText(runs, target) {
       `${missing.length > 1 ? 'those runs are' : 'that run is'} not drawn here. ` +
       'Its own report page may still show one, traced when it was published.'
     : ''
+  // A route traced with its own run says nothing: that is what a reader already assumes.
+  // One traced later — a run published weeks after it was measured is traced at that
+  // moment, from wherever the machine then was — has to say so, and has to name its run,
+  // because several runs share this map.
+  const dated = datedRoutes(runs, target)
+    .map((entry) => ` ${dom.esc(entry.label)}: ${dom.esc(entry.note)}`).join('')
   return 'Each point is where a hop answered from, which is not the same as ' +
-    'where the cable goes. A dashed leg jumps over hops that did not answer.' + omitted
+    'where the cable goes. A dashed leg jumps over hops that did not answer.' + omitted +
+    dated
 }
 
 function failedNote(failed) {

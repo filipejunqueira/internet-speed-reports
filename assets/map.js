@@ -250,9 +250,76 @@ export function mapFigure(runs, target, tokens) {
   return { data, layout }
 }
 
+// A trace runs after the probes stop, so even a route traced with its own run is a minute
+// or two late: "with the run" has to be a window, not an instant. The same number as
+// TRACE_WITH_RUN_GRACE_S in src/pingme/render_map.py, and the reasoning is written there.
+const TRACE_WITH_RUN_GRACE_S = 15 * 60
+
+// Python reads a stamp with no offset as UTC; `new Date` would read it as this browser's
+// local time, which would put the two languages hours apart on the same record. Naming the
+// zone before parsing is what keeps them together.
+const HAS_ZONE = /(Z|[+-]\d{2}:?\d{2})$/i
+
+/** An ISO 8601 stamp as milliseconds since the epoch, or null when missing or unreadable. */
+function stampMs (value) {
+  if (typeof value !== 'string') return null
+  const ms = Date.parse(HAS_ZONE.test(value) ? value : value + 'Z')
+  return Number.isNaN(ms) ? null : ms
+}
+
+/** '11 days', '4 hours', '15 minutes': the largest whole unit that is at least one.
+ *
+ * Always rounded down, matching `_gap_words` in render_map.py. "11 days" is still true at
+ * eleven days and a half, where "12 days" would not be.
+ */
+function gapWords (seconds) {
+  for (const [unit, size] of [['day', 86400], ['hour', 3600], ['minute', 60]]) {
+    const n = Math.floor(seconds / size)
+    if (n >= 1) return n === 1 ? `${n} ${unit}` : `${n} ${unit}s`
+  }
+  return 'less than a minute'
+}
+
+/** What the map has to say about when this route was traced, or null when nothing.
+ *
+ * The twin of `trace_note` in src/pingme/render_map.py, and the two are held to the same
+ * answers by tests/fixtures/trace-note-cases.json, which both test suites read. A route
+ * traced with its own run needs no words. A route traced later is still worth drawing, but
+ * the page has to say so or it reads as the route the run took. A trace with no date at all
+ * says that, rather than staying quiet and passing for the first case.
+ */
+export function traceNote (runStarted, durationS, tracedAt) {
+  const started = stampMs(runStarted)
+  const traced = stampMs(tracedAt)
+  if (started === null || traced === null) return 'When this route was traced was not recorded.'
+  // A record from before durations were stored leaves the window as the grace alone. That
+  // can call a with-the-run trace late, never a late trace with-the-run.
+  const length = typeof durationS === 'number' && Number.isFinite(durationS) ? durationS : 0
+  const sinceStart = (traced - started) / 1000
+  if (sinceStart <= length + TRACE_WITH_RUN_GRACE_S) return null
+  const date = new Date(traced).toISOString().slice(0, 10)
+  return `Traced on ${date}, ${gapWords(sinceStart - length)} after this run, ` +
+    'so it may not be the path the run took.'
+}
+
 /** The ticked runs with no route to this target, so the page can say what the map omits. */
 export function untracedRuns(runs, target) {
   return (runs || []).filter(run => !traceFor(run, target))
+}
+
+/** The drawn routes that have something to say about when they were traced, named.
+ *
+ * The twin of `trace_notes` in render_map.py, with one difference the comparison view
+ * forces: several runs share this map, so each sentence carries the name of the run it is
+ * about. One fresh route and one re-traced at publish time, drawn side by side, would
+ * otherwise leave the reader unable to tell which line to distrust.
+ */
+export function datedRoutes (runs, target) {
+  return (runs || [])
+    .filter(run => traceFor(run, target))
+    .map(run => ({ label: runName(run), note: traceNote(run.timestamp, run.duration_s,
+      traceFor(run, target).traced_at) }))
+    .filter(entry => entry.note !== null)
 }
 
 /** The same walk as the map, as rows a table can print: one entry per route drawn.
