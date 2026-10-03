@@ -67,13 +67,55 @@ export function fmt(value, nd = 1, unit = '') {
   return text + unit
 }
 
+/** A run's name: the one the page gave it to tell it apart, else its label, else its id. */
 export function runName(row) {
-  return row.label || row.id
+  return row.displayName || row.label || row.id
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * A name for each run that no other run among `rows` shares, keyed by id.
+ *
+ * Comparing one place on different days is what the explorer is for, so the same --label
+ * twice is ordinary, and a legend reading "leeds_bt" three times names nothing. Runs whose
+ * names clash get the shortest part of their UTC start that parts them: the time when they
+ * share a day, the day when each has its own, both when it is a mix, and the seconds when
+ * two share a minute. A run whose name clashes with nothing keeps it. The stamp is read as
+ * written, as dateText does, so no time zone of the reader's can shift it.
+ */
+export function distinctNames(rows) {
+  const list = rows || []
+  const base = (row) => row.label || row.id
+  const stamp = (row) => String(row.timestamp || '')
+  const day = (row) => {
+    const s = stamp(row)
+    return `${Number(s.slice(8, 10))} ${MONTHS[Number(s.slice(5, 7)) - 1] || ''}`.trim()
+  }
+  const names = new Map()
+  for (const row of list) {
+    const clash = list.filter((other) => base(other) === base(row))
+    if (clash.length < 2) {
+      names.set(row.id, base(row))
+      continue
+    }
+    const days = new Set(clash.map((r) => stamp(r).slice(0, 10)))
+    const minutes = new Set(clash.map((r) => stamp(r).slice(0, 16)))
+    let part
+    if (minutes.size < clash.length) {
+      part = days.size === 1 ? (r) => stamp(r).slice(11, 19)
+        : (r) => `${day(r)} ${stamp(r).slice(11, 19)}`
+    } else if (days.size === 1) part = (r) => stamp(r).slice(11, 16)
+    else if (days.size === clash.length) part = day
+    else part = (r) => `${day(r)} ${stamp(r).slice(11, 16)}`
+    names.set(row.id, `${base(row)} ${part(row)}`)
+  }
+  return names
 }
 
 /** The name where the space is tight: a label if there is one, else a stub of the id. */
 export function shortName(row) {
-  return row.label || String(row.id).slice(0, 10)
+  return row.displayName || row.label || String(row.id).slice(0, 10)
 }
 
 /**

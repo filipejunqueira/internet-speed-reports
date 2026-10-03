@@ -131,11 +131,11 @@ export function penaltyFigure(runs, tokens) {
     })
     // The label is muted text, not the line's colour: a threshold is chrome, not a series.
     layout.annotations.push({
-      x: value, xref: 'x', y: 1, yref: 'paper', text: label, showarrow: false,
-      xanchor: 'left', yanchor: 'bottom', font: { size: 10, color: chrome.muted }
+      x: value, xref: 'x', ...labelRow(0), text: label, showarrow: false,
+      xanchor: 'left', font: { size: 10, color: chrome.muted }
     })
   }
-  return { data: figure.data, layout }
+  return { data: figure.data, layout: withLabelRows(layout, 1) }
 }
 
 /**
@@ -164,9 +164,11 @@ export function histogramFigure(runs, target, tokens) {
     const label = esc(runName(run))
     const counts = binCounts(run, target, bins)
     if (!counts.some(count => count > 0)) return
-    const peak = counts.indexOf(Math.max(...counts))
+    // No name at the peak: runs made on one line peak in the same bin, and three names
+    // stacked there named nothing. The dataviz rule for converging series is to fall back
+    // to the legend and the hover text, and a comparison always has its legend.
     data.push({
-      type: 'scatter', mode: 'lines+text',
+      type: 'scatter', mode: 'lines',
       // One point per bin edge, held flat across the bin by the "hv" shape; the closing
       // zero draws the right-hand wall of the last bin.
       x: bins.edges.slice(), y: counts.concat([0]),
@@ -175,8 +177,6 @@ export function histogramFigure(runs, target, tokens) {
       // outline with it, and the page's theme swap only restyles line and marker colours,
       // so this fill keeps its light-mode hue. At a tenth, that is invisible either way.
       fill: 'tozeroy', fillcolor: wash(colour, WASH),
-      text: counts.map((_, j) => (j === peak ? label : '')).concat(['']),
-      textposition: 'top right', textfont: { size: 11, color: chrome.ink2 },
       name: label, legendgroup: `run${slot}`, showlegend: list.length > 1,
       hovertemplate: `%{x:.1f} ms: %{y} probes<extra>${label}</extra>`,
       meta: { role: `run${slot}` }
@@ -230,7 +230,7 @@ export function timelineFigure(run, slot, target, yRange, tokens) {
   const bands = phaseBands(run, chrome)
   layout.shapes = bands.shapes
   layout.annotations = bands.annotations
-  return { data, layout }
+  return { data, layout: withLabelRows(layout, 2) }
 }
 
 /**
@@ -315,19 +315,49 @@ function phaseBands(run, chrome) {
   const annotations = []
   // Grey, not the download and upload hues the run pages use, because in this view colour
   // is already saying which run a mark belongs to and it cannot say two things at once.
-  for (const [name, start, end] of [['download', marks.download, marks.upload],
-    ['upload', marks.upload, marks['idle-again']]]) {
+  // Each name has a row of its own, download above upload: on a phone the upload band
+  // starts a few pixels after download's, and on one row the two names ran together.
+  for (const [name, start, end, row] of [['download', marks.download, marks.upload, 1],
+    ['upload', marks.upload, marks['idle-again'], 0]]) {
     if (!isNumber(start) || !isNumber(end)) continue
     shapes.push({
       type: 'rect', xref: 'x', yref: 'paper', x0: start, x1: end, y0: 0, y1: 1,
       fillcolor: wash(chrome.muted, BAND_WASH), line: { width: 0 }, layer: 'below'
     })
     annotations.push({
-      x: start, xref: 'x', y: 1, yref: 'paper', text: name, showarrow: false,
-      xanchor: 'left', yanchor: 'bottom', font: { size: 10, color: chrome.muted }
+      x: start, xref: 'x', ...labelRow(row), text: name, showarrow: false,
+      xanchor: 'left', font: { size: 10, color: chrome.muted }
     })
   }
   return { shapes, annotations }
+}
+
+// One row of labels above the plot: a 10 px label and its box. The legend, when there is
+// one, keeps a gap above the top row, because its text box reaches a little below its foot.
+const LABEL_ROW_PX = 14
+const LEGEND_GAP_PX = 8
+
+/** Where a label belonging to a line or a band goes: row 0 sits on the plot's top edge. */
+function labelRow(row) {
+  return { y: 1, yref: 'paper', yanchor: 'bottom', yshift: row * LABEL_ROW_PX }
+}
+
+/**
+ * Make room above the plot for `rows` rows of labels, and lift the legend above them.
+ *
+ * The labels are placed in pixels, but a legend only in fractions of the plot's height, so
+ * the fraction is worked out from the height this figure is built at. Without a legend the
+ * first row uses the room the legend would have had.
+ */
+function withLabelRows(layout, rows) {
+  const legend = layout.showlegend
+  layout.margin = { ...layout.margin, t: layout.margin.t + (legend ? rows : rows - 1) * LABEL_ROW_PX }
+  if (legend) {
+    const plotPx = layout.height - layout.margin.t - layout.margin.b
+    layout.legend = { ...layout.legend, yanchor: 'bottom',
+      y: 1 + (rows * LABEL_ROW_PX + LEGEND_GAP_PX) / plotPx }
+  }
+  return layout
 }
 
 /** The chrome every figure shares: transparent, tight margins, a hairline grid, no title. */
@@ -344,7 +374,11 @@ function baseLayout(tokens, height, legend) {
     margin: { l: 56, r: 16, t: 24, b: 40 }, height,
     xaxis: { ...axis }, yaxis: { ...axis },
     showlegend: legend,
-    legend: { orientation: 'h', y: 1.08, x: 0, font: { size: 11, color: chrome.ink2 } },
+    // Standing on its foot a gap above the plot: when the names wrap to two rows on a
+    // phone, the second row grows upward and plotly widens the top margin to hold it. Hung
+    // from its top, the legend grew downward and its second row printed over the plot.
+    legend: { orientation: 'h', x: 0, yanchor: 'bottom', y: 1 + LEGEND_GAP_PX / (height - 64),
+      font: { size: 11, color: chrome.ink2 } },
     hoverlabel: { font: { family: tokens.font } }
   }
 }
@@ -371,8 +405,9 @@ function slotFor(run, index) {
   return slot === null || slot === undefined ? index : slot
 }
 
+// The same rule as dom.runName: the name the page gave the run to tell it apart comes first.
 function runName(run) {
-  return run.label || run.id
+  return run.displayName || run.label || run.id
 }
 
 /** A token hex as an rgba string, for the fills the theme swap does not reach. */

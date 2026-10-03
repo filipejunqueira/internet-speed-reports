@@ -13,6 +13,26 @@
 // a world map is concerned; drawing the second one would add a hop of zero length.
 const COLLAPSE_DEG = 0.05
 
+// The height a map needs follows from its width, by the world frame's width over its height
+// (`geoAspect` in the tokens, render_map.GEO_ASPECT). The box stops at 500 px, the height it
+// always had, where a desktop's width would ask for more.
+const MAP_MARGIN_PX = 8
+const MAP_MAX_PX = 500
+
+/**
+ * The height of a map box `width` wide, for a world frame `aspect` wide to 1 tall, whose
+ * legend, under the map, is `legendPx` tall.
+ */
+export function mapHeight (width, aspect, legendPx = 0) {
+  const inner = Math.max(0, width - 2 * MAP_MARGIN_PX)
+  return Math.min(MAP_MAX_PX,
+    Math.round(inner / aspect) + 2 * MAP_MARGIN_PX + Math.round(legendPx))
+}
+
+// Two starting points closer than this in both latitude and longitude share one "you": a
+// phone draws the world a few pixels to the degree, and the word is about twenty wide.
+const YOU_APART_DEG = 8
+
 // Where the cables that carry this traffic come ashore. Drawn for reference so a route
 // that goes the long way round is visible as such. Matches src/pingme/places.py.
 const REFERENCE_POINTS = [
@@ -77,8 +97,9 @@ export function routePoints(traceEntry, origin) {
   return walk(traceEntry, origin).points
 }
 
+// The same rule as dom.runName: the name the page gave the run to tell it apart comes first.
 function runName(run) {
-  return run.label || run.id
+  return run.displayName || run.label || run.id
 }
 
 /** The colour slot a run keeps, falling back to its place among the runs actually drawn.
@@ -132,6 +153,10 @@ export function mapFigure(runs, target, tokens) {
   const chrome = tokens.chrome.light
   const drawn = (runs || []).filter(run => traceFor(run, target))
   const data = []
+  // Which side of its end point the target's name goes, from the tokens block: US-East
+  // sits south-west of New York, and a name written east of it ran into New York's.
+  const side = (tokens.labelSide || {})[target] || 'middle right'
+  const ends = []
   drawn.forEach((run, i) => {
     const slot = slotFor(run, i)
     const colour = slots[slot] || slots[0]
@@ -190,22 +215,35 @@ export function mapFigure(runs, target, tokens) {
         hovertext: legs.hovertext, hoverinfo: 'text', meta: { role }
       })
     }
+    ends.push(points[points.length - 1])
     data.push({
       type: 'scattergeo', lat: points.map(p => p.lat), lon: points.map(p => p.lon),
       mode: 'markers+text',
-      // The run's name written at the far end of its own line, so identity never rests on
-      // colour alone.
-      text: points.map((_, j) => (j === points.length - 1 ? name : '')),
-      textposition: 'middle right', textfont: { size: 11, color: chrome.ink2 },
+      // A run drawn alone has its name written at the far end of its line. Two or more
+      // all end at the same relay, where their names stacked on one point, so they are
+      // named by the legend instead and the end gets one label of its own, below.
+      text: points.map((_, j) => (j === points.length - 1 && drawn.length === 1 ? name : '')),
+      textposition: side, textfont: { size: 11, color: chrome.ink2 },
       marker: { size: 8, color: colour },
       name, legendgroup: role, showlegend: false,
       hovertext: points.map(p => hoverFor(p, name)), hoverinfo: 'text', meta: { role }
     })
   })
+  if (drawn.length > 1) {
+    // Muted like the cable landings: the card's heading already names the target, so this
+    // only marks where on the map it is. A trace of its own, so hiding one run from the
+    // legend does not take the label away from the others.
+    data.push({
+      type: 'scattergeo', lat: [ends[0].lat], lon: [ends[0].lon], mode: 'text',
+      text: [esc(target)], textposition: side, textfont: { size: 11, color: chrome.muted },
+      name: 'end', hoverinfo: 'skip', showlegend: false, meta: { role: 'muted' }
+    })
+  }
   data.push({
     type: 'scattergeo',
     lat: REFERENCE_POINTS.map(p => p.lat), lon: REFERENCE_POINTS.map(p => p.lon),
-    mode: 'markers+text', text: REFERENCE_POINTS.map(p => p.name), textposition: 'bottom center',
+    mode: 'markers+text', text: REFERENCE_POINTS.map(p => p.name),
+    textposition: REFERENCE_POINTS.map(p => (tokens.labelSide || {})[p.name] || 'bottom center'),
     marker: { size: 6, color: chrome.muted, opacity: 0.6, symbol: 'diamond' },
     textfont: { size: 10, color: chrome.muted }, name: 'cable landing points',
     hoverinfo: 'text', showlegend: false, meta: { role: 'muted' }
@@ -223,7 +261,12 @@ export function mapFigure(runs, target, tokens) {
     data.push({
       type: 'scattergeo', lat: origins.map(o => o[0]), lon: origins.map(o => o[1]),
       mode: 'markers+text',
-      text: origins.map(() => 'you'), textposition: 'top center',
+      // Every place keeps its star, but a word only where no other "you" is near enough
+      // to print over it: Leeds and London, three degrees apart, did on a phone.
+      text: origins.map((o, j) => (origins.slice(0, j).some(p =>
+        Math.abs(p[0] - o[0]) < YOU_APART_DEG && Math.abs(p[1] - o[1]) < YOU_APART_DEG)
+        ? '' : 'you')),
+      textposition: 'top center',
       marker: { size: 11, color: chrome.muted, symbol: 'star' },
       textfont: { size: 11, color: chrome.ink2 },
       name: 'origin', hoverinfo: 'text', showlegend: false, meta: { role: 'muted' }
@@ -234,9 +277,12 @@ export function mapFigure(runs, target, tokens) {
     font: { family: tokens.font, color: chrome.ink, size: 12 },
     // A map has no axis labels to leave room for, so the margins are only the breathing
     // space the direct labels need at the edges.
-    margin: { l: 8, r: 8, t: 8, b: 8 },
+    margin: { l: MAP_MARGIN_PX, r: MAP_MARGIN_PX, t: MAP_MARGIN_PX, b: MAP_MARGIN_PX },
     showlegend: drawn.length > 1,
-    legend: { x: 0.01, y: 0.99, font: { color: chrome.ink2, size: 11 } },
+    // Under the map, not on it: on a phone the map fills its box, and a legend in the
+    // corner would sit over North America. Plotly widens the bottom margin to fit it.
+    legend: { orientation: 'h', x: 0, xanchor: 'left', y: 0, yanchor: 'top',
+      font: { color: chrome.ink2, size: 11 } },
     // The ground colours are the map's own, not part of the token palette: they are the
     // light-mode values the run pages use, and the page swaps them for the dark ones on a
     // theme change exactly as it does there.

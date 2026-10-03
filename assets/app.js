@@ -31,7 +31,7 @@ import {diffRows, liveTargets, sharedYRange} from './stats.js'
 import {
   histogramFigure, overviewFigure, penaltyFigure, themeRoles, themeTextUpdate, timelineFigure
 } from './figures.js'
-import {datedRoutes, hopRows, mapFigure, untracedRuns} from './map.js'
+import {datedRoutes, hopRows, mapFigure, mapHeight, untracedRuns} from './map.js'
 
 // The mode bar keeps zoom and pan, which are worth having on a route map and on a long
 // timeline, and loses the two selection tools, which do nothing on any chart here.
@@ -46,6 +46,11 @@ const PLOTLY_CONFIG = {
 // does not, so it is the one figure whose height the page has to give it: plotly sizes a
 // figure with no height of its own to its container.
 const MAP_HEIGHT_PX = 500
+// The map box follows its width (fitMap): a first guess of one legend row, a little air
+// between the legend's box and the bottom edge, and a pause after a resize for plotly's own.
+const MAP_LEGEND_ROW_PX = 24
+const MAP_LEGEND_GAP_PX = 4
+const MAP_FIT_DELAY_MS = 150
 
 // The parts of the comparison that name or list the chosen target, each with an id of its
 // own so that picking another target can rewrite exactly those and leave every figure div
@@ -61,6 +66,9 @@ const MAP_NOTE = 'map-note'
 // Everything the page knows, kept in module variables because there is exactly one page.
 let tokens = null
 let indexRows = []
+let mapFitTimer = null
+// The names the ticked runs are shown by, set per render by dom.distinctNames.
+let shownNames = new Map()
 let state = null
 // Every render takes a number. A fetch that finishes after a later tick has already
 // started rendering must not overwrite it, so it checks its number before writing.
@@ -254,6 +262,9 @@ async function rebuildBody() {
     return
   }
 
+  // Named from the index rows, before any record arrives, so a run whose numbers fail to
+  // load is named in the same way as the ones beside it.
+  shownNames = dom.distinctNames(ids.map((id) => indexRows.find((row) => row.id === id) || {id}))
   // Only a run that has never been fetched is worth dimming the page for; a target change
   // or a re-tick is served from the cache and should not so much as flicker.
   setLoading(ids.some((id) => !cache.has(id)))
@@ -267,7 +278,8 @@ async function rebuildBody() {
   // The rest of the comparison is still worth drawing.
   const failed = fetched.filter((item) => item.error).map((item) => item.id)
   const runs = fetched.filter((item) => item.record)
-    .map((item) => ({...item.record, slot: slotOf(state, item.id)}))
+    .map((item) => ({...item.record, slot: slotOf(state, item.id),
+      displayName: shownNames.get(item.id)}))
   const context = await renderComparison(body, runs, failed)
   // Drawing the figures is another wait, so the check is worth repeating: only a render
   // that got this far without being overtaken may say what is on screen.
@@ -314,6 +326,9 @@ function sizeFrame(frame) {
 function onResize() {
   const frame = document.querySelector('iframe.frame')
   if (frame) sizeFrame(frame)
+  // After plotly's own resize has redrawn the legend at the new width, not during it.
+  clearTimeout(mapFitTimer)
+  mapFitTimer = setTimeout(fitMap, MAP_FIT_DELAY_MS)
 }
 
 // ---- the comparison -----------------------------------------------------------------------
@@ -371,6 +386,7 @@ async function renderComparison(body, runs, failed) {
       // whether there is a table in it or not: a target change may put one back.
       `<div id="${BOX_HOPS}">${dom.hopTable(hopRows(runs, target), tokens)}</div>`, HEAD_MAP))
 
+  presizeMap()
   const figures = [
     plot('fig-overview', overviewFigure(runs, tokens)),
     plot('fig-penalty', penaltyFigure(runs, tokens)),
@@ -381,6 +397,7 @@ async function renderComparison(body, runs, failed) {
     figures.push(plot(timelineId(i), timelineFigure(run, run.slot, target, yRange, tokens)))
   })
   await Promise.all(figures)
+  await fitMap()
   applyTheme() // the figures were built from the light tokens, so this is where dark lands
   return {runs, live, target}
 }
@@ -432,6 +449,7 @@ async function retarget() {
   await Promise.all(figures)
   // A second target click while these were drawing owns the page now.
   if (seq !== renderSeq) return
+  await fitMap() // the legend is the same runs, but a phone may wrap it differently
   drawn = {...drawn, target}
   // The redrawn figures come back in their light colours and the table and hop tables
   // carry fresh swatches, both of which this puts right in dark mode. Only the figures this
@@ -476,6 +494,33 @@ function pressSegment(target) {
 function resolveTarget(live) {
   if (live.includes(state.target)) return state.target
   return live[0] || DEFAULT_TARGET
+}
+
+/**
+ * Give the map's box the height its width calls for (map.mapHeight) before the first draw,
+ * allowing one row of legend, so a phone does not see a 500 px box shrink under it.
+ */
+function presizeMap() {
+  const div = document.getElementById('fig-map')
+  if (div) div.style.height = `${mapHeight(div.clientWidth, tokens.geoAspect, MAP_LEGEND_ROW_PX)}px`
+}
+
+/**
+ * Fit the map's box to the legend plotly actually drew under it. How the names wrap is only
+ * known once they are drawn, so this measures and resizes, at most twice: a resize can
+ * rewrap the legend once more.
+ */
+async function fitMap() {
+  const div = document.getElementById('fig-map')
+  if (!div || !div.data) return
+  for (let pass = 0; pass < 2; pass++) {
+    const legend = div.querySelector('.legend')
+    const legendPx = legend ? legend.getBoundingClientRect().height + MAP_LEGEND_GAP_PX : 0
+    const height = mapHeight(div.clientWidth, tokens.geoAspect, legendPx)
+    if (Math.abs(div.clientHeight - height) <= 1) return
+    div.style.height = `${height}px`
+    await Plotly.Plots.resize(div)
+  }
 }
 
 /** A box for plotly to draw into. A height is only given where the figure has none. */
@@ -537,6 +582,7 @@ function failedNote(failed) {
 
 /** A run's name from the index row, so a run that failed to load can still be named. */
 function nameOf(id) {
+  if (shownNames.has(id)) return shownNames.get(id)
   const row = indexRows.find((item) => item.id === id)
   return row ? dom.runName(row) : id
 }
